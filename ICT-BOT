@@ -148,23 +148,23 @@ void FVG()
          {
          //bullish
          double prevDayLow = NormalizeDouble(iLow(NULL,PERIOD_D1,0),_Digits);
-         double currentPriceLow = NormalizeDouble(SymbolInfoDouble(_Symbol,SYMBOL_BID),_Digits);
+         double currentDayLow = NormalizeDouble(iLow(_Symbol,PERIOD_D1,0),_Digits);
       
-         if (prevDayLow < currentPriceLow)
+         if (prevDayLow < currentDayLow)
             {
              //Print("The daily high has been cleared at: ",prevDayLow);
             }
          double barOneLow = NormalizeDouble(iLow(_Symbol,PERIOD_M15,i-1),_Digits);
          double barTwoHigh = NormalizeDouble(iHigh(_Symbol,PERIOD_M15,i+1),_Digits);
          
-         if( barOneLow > barTwoHigh  && prevDayLow > currentPriceLow)
+         if( barOneLow > barTwoHigh  && prevDayLow < currentDayLow)
             {
             Print("There is a bulish FVG at: ",barOneLow);
             }
           //bearish
           double prevDayHigh = NormalizeDouble(iHigh(NULL,PERIOD_D1,0),_Digits);
-          double currentPriceHigh = NormalizeDouble(SymbolInfoDouble(_Symbol,SYMBOL_ASK),_Digits);
-          if (prevDayHigh < currentPriceHigh)
+          double currentDayHigh = NormalizeDouble(iHigh(_Symbol,PERIOD_D1,0),_Digits);
+          if (prevDayHigh < currentDayHigh)
             {
              //Print("The daily high has been cleared at: ",prevDayHigh);
             }
@@ -172,7 +172,7 @@ void FVG()
           double barOneHigh = NormalizeDouble(iHigh(_Symbol,PERIOD_M15,i-1),_Digits);
           double barTwoLow = NormalizeDouble(iLow(_Symbol,PERIOD_M15,i+1),_Digits);
           
-          if(barOneHigh < barTwoLow && prevDayHigh < currentPriceHigh)
+          if(barOneHigh < barTwoLow && prevDayHigh > currentDayHigh)
             {
             Print("There is a bearish FVG at: ",barOneHigh);
             }
