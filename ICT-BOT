@@ -1,15 +1,27 @@
+#include <Trade/Trade.mqh>
+
 datetime currentDayStart = iTime(NULL, PERIOD_D1, 0);
-datetime currentDayEnd = currentDayStart + 86400; // 86400 seconds in a day
+datetime currentDayEnd = currentDayStart + 86400;
+
+
+CTrade Trade;
+
+
+input double lotsize = 0.01;
+
+
 int OnInit()
   {
+  
+
 //---
 
 //high();
 //low();
 //object();
 //Daily_high_and_low_break();
-FVG();
-   
+//FVG();
+
 //---
    return(INIT_SUCCEEDED);
   }
@@ -26,7 +38,9 @@ void OnDeinit(const int reason)
 //+------------------------------------------------------------------+
 void OnTick()
   {
-//---
+      datetime HighbreakTime = GetFirstDailyHighBreakTime();
+      datetime LowbreakTime = GetFirstDailyLowBreakTime();
+
    
   }
 //+------------------------------------------------------------------+
@@ -72,111 +86,125 @@ void low()
                 }
          }
     }
-void object()
-   {
-      // Create an object to draw the lines at the highs and lows
-int lineCounter = 0; // Counter to create unique object names
 
-// Loop through the bars of the current day in 15-minute intervals
-for (int i = 2; i < 96; i++) // Start from i=2 to ensure we have previous and next bars
+
+
+datetime GetFirstDailyHighBreakTime()
 {
-    datetime barTime = iTime(NULL, PERIOD_M15, i);
-    
-    // Check if the bar is within the current day range
-    if (barTime >= currentDayStart && barTime < currentDayEnd)
+    static datetime firstBreakTime = 0;
+    static double dailyHigh = 0;
+    static bool highBroken = false;
+    static int currentDay = -1;
+
+    datetime now = TimeCurrent();
+    MqlDateTime timeStruct;
+    TimeToStruct(now, timeStruct);
+
+    // New day reset
+    if (timeStruct.day != currentDay)
     {
-        double highPrev = NormalizeDouble(iHigh(NULL, PERIOD_M15, i - 1), _Digits); // High of the previous candle
-        double highMid = NormalizeDouble(iHigh(NULL, PERIOD_M15, i), _Digits);      // High of the middle (current) candle
-        double highNext = NormalizeDouble(iHigh(NULL, PERIOD_M15, i + 1), _Digits); // High of the next candle
-
-        // Check if the high of the middle candle is greater than the previous and next candles
-        if (highPrev < highMid && highMid > highNext)
-        {
-            // Draw a line at the high of the middle candle
-            string highLineName = "HighLine_" + IntegerToString(lineCounter);
-            ObjectCreate(0, highLineName, OBJ_TREND, 0, barTime, highMid, iTime(NULL, PERIOD_M15, i + 1), highMid);
-            ObjectSetInteger(0, highLineName, OBJPROP_COLOR, clrWhite); // Set the color to white
-            lineCounter++;
-        }
-
-        double lowPrev = NormalizeDouble(iLow(NULL, PERIOD_M15, i - 1), _Digits); // Low of the previous candle
-        double lowMid = NormalizeDouble(iLow(NULL, PERIOD_M15, i), _Digits);      // Low of the middle (current) candle
-        double lowNext = NormalizeDouble(iLow(NULL, PERIOD_M15, i + 1), _Digits); // Low of the next candle
-
-        // Check if the low of the middle candle is lower than the previous and next candles
-        if (lowPrev > lowMid && lowMid < lowNext)
-        {
-            // Draw a line at the low of the middle candle
-            string lowLineName = "LowLine_" + IntegerToString(lineCounter);
-            ObjectCreate(0, lowLineName, OBJ_TREND, 0, barTime, lowMid, iTime(NULL, PERIOD_M15, i + 1), lowMid);
-            ObjectSetInteger(0, lowLineName, OBJPROP_COLOR, clrWhite); // Set the color to white
-            lineCounter++;
-        }
+        currentDay = timeStruct.day;
+        highBroken = false;
+        firstBreakTime = 0;
+        dailyHigh = iHigh(_Symbol, PERIOD_D1, 0);  // Today's high so far
     }
+
+    double price = SymbolInfoDouble(_Symbol, SYMBOL_BID);
+
+    if (!highBroken && price > dailyHigh)
+    {
+        highBroken = true;
+        firstBreakTime = now;
+    }
+
+    return firstBreakTime;  // Will be 0 if not broken yet
 }
 
-   }
-   
-void Daily_high_and_low_break()
-   {
-   //Low
-   double prevDayLow = NormalizeDouble(iLow(NULL,PERIOD_D1,0),_Digits);
-   double currentPriceLow = NormalizeDouble(SymbolInfoDouble(_Symbol,SYMBOL_BID),_Digits);
 
-   if (prevDayLow < currentPriceLow)
-      {
-      Print("The daily high has been cleared at: ",prevDayLow);
-      }
-      
-   //High
-   double prevDayHigh = NormalizeDouble(iHigh(NULL,PERIOD_D1,0),_Digits);
-   double currentPriceHigh = NormalizeDouble(SymbolInfoDouble(_Symbol,SYMBOL_ASK),_Digits);
-   if (prevDayHigh < currentPriceHigh)
-      {
-      Print("The daily high has been cleared at: ",prevDayHigh);
-      }
-   
-   }
+datetime GetFirstDailyLowBreakTime()
+{
+    static datetime firstBreakTime = 0;
+    static double dailyLow = 0;
+    static bool lowBroken = false;
+    static int currentDay = -1;
 
-void FVG()
+    datetime now = TimeCurrent();
+    MqlDateTime timeStruct;
+    TimeToStruct(now, timeStruct);
+
+    // New day reset
+    if (timeStruct.day != currentDay)
+    {
+        currentDay = timeStruct.day;
+        lowBroken = false;
+        firstBreakTime = 0;
+        dailyLow = iHigh(_Symbol, PERIOD_D1, 0);  // Today's high so far
+    }
+
+    double price = SymbolInfoDouble(_Symbol, SYMBOL_BID);
+
+    if (!lowBroken && price > dailyLow)
+    {
+        lowBroken = true;
+        firstBreakTime = now;
+    }
+
+    return firstBreakTime;  // Will be 0 if not broken yet
+}
+
+//+------------------------------------------------------------------+
+//|  Finds the first bearish FVG after a given time                  |
+//|  Returns the index of the middle candle (C2) or -1 if not found  |
+//+------------------------------------------------------------------+
+int FindBearishFVG(datetime HighbreakTime, int lookback = 500)
+{
+   int startIndex = iBarShift(_Symbol, PERIOD_M15, HighbreakTime, false);
+   if(startIndex < 0) return -1;
+
+   // loop from older to newer candles after startTime
+   for(int i = startIndex - 2; i >= 0 && i >= startIndex - lookback; i--)
    {
-   for (int i=2; i<96; i++)
+      double highC3 = iHigh(_Symbol, PERIOD_M15, i);       // Candle 3
+      double lowC1  = iLow(_Symbol, PERIOD_M15, i + 2);    // Candle 1
+      double closeC2= iClose(_Symbol, PERIOD_M15, i + 1);  // Candle 2
+      double openC2 = iOpen(_Symbol, PERIOD_M15, i + 1);
+
+      // Bearish FVG condition:
+      if(highC3 < lowC1 && closeC2 < openC2) // gap + bearish middle
       {
-      datetime barTime = iTime(_Symbol,PERIOD_M15,i);
-      
-      if(barTime >= currentDayStart && barTime < currentDayEnd)
-         {
-         //bullish
-         double prevDayLow = NormalizeDouble(iLow(NULL,PERIOD_D1,0),_Digits);
-         double currentDayLow = NormalizeDouble(iLow(_Symbol,PERIOD_D1,0),_Digits);
-      
-         if (prevDayLow < currentDayLow)
-            {
-             //Print("The daily high has been cleared at: ",prevDayLow);
-            }
-         double barOneLow = NormalizeDouble(iLow(_Symbol,PERIOD_M15,i-1),_Digits);
-         double barTwoHigh = NormalizeDouble(iHigh(_Symbol,PERIOD_M15,i+1),_Digits);
-         
-         if( barOneLow > barTwoHigh  && prevDayLow < currentDayLow)
-            {
-            Print("There is a bulish FVG at: ",barOneLow);
-            }
-          //bearish
-          double prevDayHigh = NormalizeDouble(iHigh(NULL,PERIOD_D1,0),_Digits);
-          double currentDayHigh = NormalizeDouble(iHigh(_Symbol,PERIOD_D1,0),_Digits);
-          if (prevDayHigh < currentDayHigh)
-            {
-             //Print("The daily high has been cleared at: ",prevDayHigh);
-            }
-      
-          double barOneHigh = NormalizeDouble(iHigh(_Symbol,PERIOD_M15,i-1),_Digits);
-          double barTwoLow = NormalizeDouble(iLow(_Symbol,PERIOD_M15,i+1),_Digits);
-          
-          if(barOneHigh < barTwoLow && prevDayHigh > currentDayHigh)
-            {
-            Print("There is a bearish FVG at: ",barOneHigh);
-            }
-          }
+         return (i + 1); // return index of middle candle
       }
    }
-   
+   return -1;
+}
+
+//+------------------------------------------------------------------+
+//|  Finds the first bullish FVG after a given time                  |
+//|  Returns the index of the middle candle (C2) or -1 if not found  |
+//+------------------------------------------------------------------+
+int FindBullishFVG(datetime LowbreakTime, int lookback = 500)
+{
+   int startIndex = iBarShift(_Symbol, PERIOD_M15, LowbreakTime, false);
+   if(startIndex < 0) return -1;
+
+   // loop from older to newer candles after startTime
+   for(int i = startIndex - 2; i >= 0 && i >= startIndex - lookback; i--)
+   {
+      double lowC3  = iLow(_Symbol, PERIOD_M15, i);       // Newest
+      double highC1 = iHigh(_Symbol, PERIOD_M15, i + 2);  // Middle
+      double closeC2= iClose(_Symbol, PERIOD_M15, i + 1); // Candle 2
+      double openC2 = iOpen(_Symbol, PERIOD_M15, i + 1);
+      double stoploss = iLow(_Symbol, PERIOD_M15, i + 2);  //Oldest
+      double takeprofit = iHigh(_Symbol, PERIOD_M15, i);  //newest
+
+      // Bullish FVG condition:
+      if(lowC3 > highC1 && closeC2 > openC2) // gap + bullish middle
+      {
+         Trade.BuyLimit(lotsize, lowC3, NULL, stoploss, takeprofit, ORDER_TIME_DAY,NULL);
+         Trade.BuyLimit(lotsize, lowC3, NULL, stoploss, takeprofit, ORDER_TIME_DAY,NULL);
+
+         return (i + 1); // return index of middle candle
+      }
+   }
+   return -1;
+}
