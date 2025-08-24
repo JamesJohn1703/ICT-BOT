@@ -3,8 +3,25 @@
 datetime currentDayStart = iTime(NULL, PERIOD_D1, 0);
 datetime currentDayEnd = currentDayStart + 86400;
 
+datetime HighbreakTime; //Time of the day the previous day's high is broken
+datetime LowbreakTime; //Time of the day the previous day's low is broken
 
-CTrade Trade;
+
+datetime RecentLowBreakTime; //The time when the recent low is broken
+datetime RecentHighBreakTime; //The time when the recent high is broken
+
+
+double recentLow; //The most recent low before break of daily high
+double recentHigh; //The most recent high before break of daily low
+
+int lastDay = -1;  //Variable For reseting the day
+int tradeCount = 0;  //Variable For counting trades
+
+int dailybias = 0;  //Bias of the day #1 for bullish, #2 for bearish #0 for both
+
+
+
+CTrade Trade;//For placing trades
 
 
 input double lotsize = 0.01;
@@ -12,17 +29,7 @@ input double lotsize = 0.01;
 
 int OnInit()
   {
-  
-
-//---
-
-//high();
-//low();
-//object();
-//Daily_high_and_low_break();
-//FVG();
-
-//---
+   Print("The EA is perfectly loaded."); 
    return(INIT_SUCCEEDED);
   }
 //+------------------------------------------------------------------+
@@ -38,55 +45,44 @@ void OnDeinit(const int reason)
 //+------------------------------------------------------------------+
 void OnTick()
   {
-      datetime HighbreakTime = GetFirstDailyHighBreakTime();
-      datetime LowbreakTime = GetFirstDailyLowBreakTime();
+      datetime todayStart = iTime(_Symbol, PERIOD_D1, 0);
+      MqlDateTime t;
+      TimeToStruct(todayStart, t);
 
-   
+      if(t.day != lastDay) // new day
+      {
+         lastDay = t.day;
+         Print("New Day Detected. Reloading EA daily values...");
+      }
+      GetDailyValues();
   }
-//+------------------------------------------------------------------+
-void high()
-   {
-      for (int i = 2; i < 96; i++) // Start from i=2 to ensure we have previous and next bars
-         {
-             datetime barTime = iTime(NULL, PERIOD_M15, i);
-             
-             // Check if the bar is within the current day range
-             if (barTime >= currentDayStart && barTime < currentDayEnd)
-                {
-                    double highPrev = NormalizeDouble(iHigh(NULL, PERIOD_M15, i - 1), _Digits); // High of the previous candle
-                    double highMid = NormalizeDouble(iHigh(NULL, PERIOD_M15, i), _Digits);      // High of the middle (current) candle
-                    double highNext = NormalizeDouble(iHigh(NULL, PERIOD_M15, i + 1), _Digits); // High of the next candle
-            
-                    // Check if the high of the middle candle is greater than the previous and next candles
-                    if (highPrev < highMid && highMid > highNext)
-                       {
-                           Print("The high before the clear of liquidity is: ", highMid);
-                       }
-                }
-         }
-   }
-void low()
-   {
-      for (int i = 2; i < 96; i++) // Start from i=2 to ensure we have previous and next bars
-         {
-             datetime barTime = iTime(NULL, PERIOD_M15, i);
-             
-             // Check if the bar is within the current day range
-             if (barTime >= currentDayStart && barTime < currentDayEnd)
-                {
-                    double lowPrev = NormalizeDouble(iLow(NULL, PERIOD_M15, i - 1), _Digits); // Low of the previous candle
-                    double lowMid = NormalizeDouble(iLow(NULL, PERIOD_M15, i), _Digits);      // Low of the middle (current) candle
-                    double lowNext = NormalizeDouble(iLow(NULL, PERIOD_M15, i + 1), _Digits); // Low of the next candle
-            
-                    // Check if the low of the middle candle is lower than the previous and next candles
-                    if (lowPrev > lowMid && lowMid < lowNext)
-                       {
-                           Print("The low before the clear of liquidity is: ", lowMid);
-                       }
-                }
-         }
-    }
+  
+void GetDailyValues()
+{
+   // Put all your "once-a-day" calculations here
+   datetime HighbreakTime = GetFirstDailyHighBreakTime();
+   datetime LowbreakTime = GetFirstDailyLowBreakTime();
+   
+   double recentLow = GetSpecificDayLocalLow();
+   double recentHigh = GetSpecificDayLocalHigh();
+   
+   if(dailybias == 0)
+     {
+        FindBearishFVG();
+        FindBullishFVG();
+     }
+   else if(dailybias == 1 && iHigh(_Symbol,PERIOD_D1,1) > iHigh(_Symbol,PERIOD_D1,2))
+          {
+            FindBullishFVG();
+          }
+   else if(dailybias == 2 && iLow(_Symbol,PERIOD_D1,1) < iLow(_Symbol,PERIOD_D1,2))
+          {
+            FindBearishFVG();
+          }
+   
+}
 
+//+------------------------------------------------------------------+
 
 
 datetime GetFirstDailyHighBreakTime()
@@ -138,7 +134,7 @@ datetime GetFirstDailyLowBreakTime()
         currentDay = timeStruct.day;
         lowBroken = false;
         firstBreakTime = 0;
-        dailyLow = iHigh(_Symbol, PERIOD_D1, 0);  // Today's high so far
+        dailyLow = iLow(_Symbol, PERIOD_D1, 0);  // Today's high so far
     }
 
     double price = SymbolInfoDouble(_Symbol, SYMBOL_BID);
@@ -156,55 +152,191 @@ datetime GetFirstDailyLowBreakTime()
 //|  Finds the first bearish FVG after a given time                  |
 //|  Returns the index of the middle candle (C2) or -1 if not found  |
 //+------------------------------------------------------------------+
-int FindBearishFVG(datetime HighbreakTime, int lookback = 500)
+void FindBearishFVG(int lookback = 500)
 {
    int startIndex = iBarShift(_Symbol, PERIOD_M15, HighbreakTime, false);
-   if(startIndex < 0) return -1;
+   if(startIndex < 0) return;   // nothing to do if no bar matches
 
-   // loop from older to newer candles after startTime
+   // Loop from older to newer candles after startIndex
    for(int i = startIndex - 2; i >= 0 && i >= startIndex - lookback; i--)
    {
-      double highC3 = iHigh(_Symbol, PERIOD_M15, i);       // Candle 3
-      double lowC1  = iLow(_Symbol, PERIOD_M15, i + 2);    // Candle 1
-      double closeC2= iClose(_Symbol, PERIOD_M15, i + 1);  // Candle 2
-      double openC2 = iOpen(_Symbol, PERIOD_M15, i + 1);
+      // Safety: make sure we don’t access negative indexes
+      if(i + 2 >= iBars(_Symbol, PERIOD_M15)) continue;
 
-      // Bearish FVG condition:
-      if(highC3 < lowC1 && closeC2 < openC2) // gap + bearish middle
+      double highC3 = iHigh(_Symbol, PERIOD_M15, i);       // Candle 3 (newer)
+      double lowC1  = iLow(_Symbol, PERIOD_M15, i + 2);    // Candle 1 (older)
+      double closeC2= iClose(_Symbol, PERIOD_M15, i + 1);  // Candle 2 (middle)
+      double openC2 = iOpen(_Symbol, PERIOD_M15, i + 1);
+      double stoploss   = iHigh(_Symbol, PERIOD_M15, i + 2);  // Oldest
+      double takeprofit = iLow(_Symbol, PERIOD_M15, i);       // Newest
+
+      // Bearish FVG condition
+      if(highC3 < lowC1 && closeC2 < openC2 &&
+         RecentLowBreakTime != 0 && RecentLowBreakTime > GetFirstDailyHighBreakTime())
       {
-         return (i + 1); // return index of middle candle
+         // Place your trade
+         buyLimit(highC3, stoploss, takeprofit);
       }
    }
-   return -1;
 }
 
 //+------------------------------------------------------------------+
 //|  Finds the first bullish FVG after a given time                  |
 //|  Returns the index of the middle candle (C2) or -1 if not found  |
 //+------------------------------------------------------------------+
-int FindBullishFVG(datetime LowbreakTime, int lookback = 500)
+void FindBullishFVG(int lookback = 500)
 {
    int startIndex = iBarShift(_Symbol, PERIOD_M15, LowbreakTime, false);
-   if(startIndex < 0) return -1;
+   if(startIndex < 0) return;
 
-   // loop from older to newer candles after startTime
+   // loop from older to newer candles after LowbreakTime
    for(int i = startIndex - 2; i >= 0 && i >= startIndex - lookback; i--)
    {
-      double lowC3  = iLow(_Symbol, PERIOD_M15, i);       // Newest
-      double highC1 = iHigh(_Symbol, PERIOD_M15, i + 2);  // Middle
-      double closeC2= iClose(_Symbol, PERIOD_M15, i + 1); // Candle 2
-      double openC2 = iOpen(_Symbol, PERIOD_M15, i + 1);
-      double stoploss = iLow(_Symbol, PERIOD_M15, i + 2);  //Oldest
-      double takeprofit = iHigh(_Symbol, PERIOD_M15, i);  //newest
+      double lowC3    = iLow(_Symbol, PERIOD_M15, i);       // Newest candle low
+      double highC1   = iHigh(_Symbol, PERIOD_M15, i + 2);  // Oldest candle high
+      double closeC2  = iClose(_Symbol, PERIOD_M15, i + 1); // Middle candle close
+      double openC2   = iOpen(_Symbol, PERIOD_M15, i + 1);  // Middle candle open
+      double stoploss = iLow(_Symbol, PERIOD_M15, i + 2);   // Oldest candle low
+      double takeprofit = iHigh(_Symbol, PERIOD_M15, i);    // Newest candle high
 
-      // Bullish FVG condition:
-      if(lowC3 > highC1 && closeC2 > openC2) // gap + bullish middle
+      // Bullish FVG condition: gap + bullish middle candle
+      if(lowC3 > highC1 && closeC2 > openC2 && RecentHighBreakTime != 0 && RecentHighBreakTime > getRecentLowBreakTime())
       {
-         Trade.BuyLimit(lotsize, lowC3, NULL, stoploss, takeprofit, ORDER_TIME_DAY,NULL);
-         Trade.BuyLimit(lotsize, lowC3, NULL, stoploss, takeprofit, ORDER_TIME_DAY,NULL);
-
-         return (i + 1); // return index of middle candle
+         buyLimit(lowC3, stoploss, takeprofit); // corrected to buy
       }
    }
-   return -1;
 }
+
+
+//Gets the recent low before the clear of daily high
+double GetSpecificDayLocalLow()
+   {
+      datetime day_start = iTime(_Symbol, PERIOD_D1, 0);          // start of current day
+      datetime day_end   = day_start + 86400;                     // start of next day
+      
+      int total_bars = iBars(_Symbol, PERIOD_M15);
+   
+      for(int i = 1; i < total_bars - 1; i++)
+      {
+         datetime t = iTime(_Symbol, PERIOD_M15, i);
+         
+         // Only check if candle is inside current day
+         if(t >= day_start && t < day_end)
+         {
+            double low_prev = iLow(_Symbol, PERIOD_M15, i+1);
+            double low_curr = iLow(_Symbol, PERIOD_M15, i);
+            double low_next = iLow(_Symbol, PERIOD_M15, i-1);
+   
+            // local minimum condition
+            if(low_curr < low_prev && low_curr < low_next)
+            {
+               // match the specific time exactly
+               if(t < HighbreakTime)
+                  return low_curr;
+            }
+         }
+      }
+      
+      return 0; // not found
+   }
+
+//Gets the recent high before the clear of daily high
+double GetSpecificDayLocalHigh()
+   {
+      datetime day_start = iTime(_Symbol, PERIOD_D1, 0);          // start of current day
+      datetime day_end   = day_start + 86400;                     // start of next day
+      
+      int total_bars = iBars(_Symbol, PERIOD_M15);
+   
+      for(int i = 1; i < total_bars - 1; i++)
+      {
+         datetime t = iTime(_Symbol, PERIOD_M15, i);
+         
+         // Only check if candle is inside current day
+         if(t >= day_start && t < day_end)
+         {
+            double high_prev = iHigh(_Symbol, PERIOD_M15, i+1);
+            double high_curr = iHigh(_Symbol, PERIOD_M15, i);
+            double high_next = iHigh(_Symbol, PERIOD_M15, i-1);
+   
+            // local minimum condition
+            if(high_curr > high_prev && high_curr > high_next)
+            {
+               // match the specific time exactly
+               if(t < LowbreakTime)
+                  return high_curr;
+            }
+         }
+      }
+      
+      return 0; // not found
+   }
+   
+//This places a buy limit trade
+void buyLimit (double entry, double stoploss, double takeprofit)
+   {
+      if (HighbreakTime != 0 && recentHigh != 0 && getRecentHighBreakTime() != 0){
+      if(tradeCount<2)
+         {
+            Trade.BuyLimit(lotsize,entry,NULL,stoploss,takeprofit,ORDER_TIME_DAY);
+         }}
+   }
+   
+//This places a sell limit trade
+void sellLimit (double entry, double stoploss, double takeprofit)
+   {
+      if (LowbreakTime != 0 && recentLow != 0 && getRecentLowBreakTime() != 0){
+      if(tradeCount<2)
+         {
+            Trade.SellLimit(lotsize,entry,NULL,stoploss,takeprofit,ORDER_TIME_DAY);
+         }}
+   }
+   
+   
+//The first time the recent high before daily low break is broken  
+datetime getRecentHighBreakTime()
+{
+   int bars = iBars(_Symbol, PERIOD_M15);
+   if(bars < 2) return 0;   // not enough bars
+
+   // Loop from oldest (bars-1) to newest (0)
+   for(int i = bars - 1; i >= 1; i--) 
+   {
+      double high = iHigh(_Symbol, PERIOD_M15, i);
+      datetime barTime = iTime(_Symbol, PERIOD_M15, i);
+
+      // Check if bar crosses the level
+      if(high >= recentHigh)
+      {
+         return barTime;   // first time level was broken
+      }
+   }
+
+   return 0;  // not broken yet
+}
+
+//The first time the recent low before daily low break is broken  
+datetime getRecentLowBreakTime()
+{
+   int bars = iBars(_Symbol, PERIOD_M15);
+   if(bars < 2) return 0;   // not enough bars
+
+   // Loop from oldest (bars-1) to newest (0)
+   for(int i = bars - 1; i >= 1; i--) 
+   {
+      double low  = iLow(_Symbol, PERIOD_M15, i);
+      datetime barTime = iTime(_Symbol, PERIOD_M15, i);
+
+      // Check if bar crosses the level
+      if(low <= recentLow)
+      {
+         return barTime;   // first time level was broken
+      }
+   }
+
+   return 0;  // not broken yet
+}
+
+
+
+//The continuation is checking if all the conditions for placing a trade are okay and are working fine. 
